@@ -2,75 +2,197 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ROAD RAGE</title>
-  <link rel="stylesheet" href="style.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: #0d0d0d;
+      display: flex; align-items: center; justify-content: center;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      font-family: 'Press Start 2P', monospace;
+      color: #fff;
+    }
+
+    /* ── Screens ── */
+    .screen {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 24px;
+      background: #0d0d0d;
+      z-index: 20;
+    }
+    .screen.hidden { display: none; }
+
+    /* Lobby */
+    #s-lobby h1 {
+      font-size: 48px;
+      color: #FF3366;
+      text-shadow: 4px 4px 0 #8B0029, 0 0 40px #FF3366aa;
+      letter-spacing: 4px;
+      line-height: 1.1;
+      text-align: center;
+    }
+    #s-lobby p { font-size: 9px; color: #888; letter-spacing: 3px; margin-top: -8px; }
+
+    .row { display: flex; gap: 12px; }
+
+    input[type=text] {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 14px;
+      background: #1a1a1a;
+      border: 3px solid #444;
+      color: #fff;
+      padding: 12px 16px;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      outline: none;
+      width: 200px;
+    }
+    input[type=text]:focus { border-color: #FF3366; }
+
+    button {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 12px;
+      padding: 12px 20px;
+      background: #FF3366;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      transition: background 0.1s;
+    }
+    button:hover { background: #ff6688; }
+    button:active { transform: translate(2px,2px); }
+
+    .hint { font-size: 8px; color: #555; letter-spacing: 2px; }
+
+    /* Waiting */
+    #s-waiting h2 { font-size: 16px; color: #ffcc00; letter-spacing: 2px; }
+    .dots::after {
+      content: '';
+      animation: dot 1.2s steps(4, end) infinite;
+    }
+    @keyframes dot { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
+    .room-tag { font-size: 9px; color: #555; letter-spacing: 3px; }
+
+    /* Countdown overlay */
+    #s-countdown {
+      background: rgba(0,0,0,0.7);
+      pointer-events: none;
+    }
+    #cd-num {
+      font-size: 120px;
+      color: #ffcc00;
+      text-shadow: 6px 6px 0 #8B6000, 0 0 60px #ffcc00aa;
+      animation: pop 0.8s ease-out forwards;
+    }
+    @keyframes pop {
+      0%   { transform: scale(2); opacity: 0; }
+      30%  { transform: scale(1); opacity: 1; }
+      85%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Finish overlay */
+    #s-finish { background: rgba(0,0,0,0.82); }
+    #s-finish h2 { font-size: 32px; color: #ffcc00; text-shadow: 4px 4px 0 #8B6000; }
+    #s-finish p  { font-size: 10px; color: #aaa; letter-spacing: 2px; }
+    #btn-rematch { margin-top: 8px; background: #33CCFF; }
+    #btn-rematch:hover { background: #66ddff; }
+
+    /* Canvas */
+    #canvas {
+      display: block;
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      image-rendering: pixelated;
+    }
+
+    /* HUD */
+    #hud {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      font-family: 'Press Start 2P', monospace;
+    }
+    .hud-corner {
+      position: absolute;
+      padding: 10px 14px;
+      background: rgba(0,0,0,0.7);
+      border: 2px solid #333;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    #hud-me  { top:12px; left:12px; border-color: #FF3366; }
+    #hud-opp { top:12px; right:12px; border-color: #33CCFF; text-align:right; }
+
+    .hud-label { font-size: 7px; color: #888; letter-spacing: 2px; }
+    .hud-val   { font-size: 14px; letter-spacing: 1px; }
+    #hud-me  .hud-val { color: #FF3366; }
+    #hud-opp .hud-val { color: #33CCFF; }
+
+    .hp-track { width: 120px; height: 10px; background: #333; border: 1px solid #555; }
+    .hp-fill  { height: 100%; transition: width .08s; }
+    #hp-me-fill  { background: #FF3366; }
+    #hp-opp-fill { background: #33CCFF; }
+    #hud-opp .hp-track { margin-left: auto; }
+  </style>
 </head>
 <body>
 
-  <!-- Lobby -->
-  <div id="lobby">
-    <div class="lobby-inner">
-      <h1 class="title">ROAD<br>RAGE</h1>
-      <p class="subtitle">2-PLAYER RACING</p>
-      <div class="input-group">
-        <input type="text" id="roomInput" placeholder="Room ID" maxlength="12" autocomplete="off" spellcheck="false">
-        <button id="joinBtn">JOIN</button>
-      </div>
-      <p class="hint">Share the same Room ID with your opponent</p>
-    </div>
+<!-- Lobby -->
+<div id="s-lobby" class="screen">
+  <h1>ROAD<br>RAGE</h1>
+  <p>2 PLAYER RACING</p>
+  <div class="row">
+    <input id="inp-room" type="text" placeholder="ROOM ID" maxlength="10">
+    <button id="btn-join">JOIN</button>
   </div>
+  <p class="hint">same room id = same race</p>
+</div>
 
-  <!-- Waiting -->
-  <div id="waiting" class="hidden">
-    <div class="lobby-inner">
-      <h2>Waiting for opponent…</h2>
-      <div class="spinner"></div>
-      <p class="room-label" id="waitingRoomId"></p>
-    </div>
+<!-- Waiting -->
+<div id="s-waiting" class="screen hidden">
+  <h2>WAITING<span class="dots"></span></h2>
+  <p class="room-tag" id="tag-room"></p>
+</div>
+
+<!-- Countdown -->
+<div id="s-countdown" class="screen hidden">
+  <div id="cd-num"></div>
+</div>
+
+<!-- Finish -->
+<div id="s-finish" class="screen hidden">
+  <h2 id="finish-title"></h2>
+  <p  id="finish-sub"></p>
+  <button id="btn-rematch">REMATCH</button>
+</div>
+
+<!-- HUD -->
+<div id="hud" style="display:none">
+  <div class="hud-corner" id="hud-me">
+    <span class="hud-label">YOU — LAP</span>
+    <span class="hud-val" id="hud-lap">0/3</span>
+    <span class="hud-label">HP</span>
+    <div class="hp-track"><div class="hp-fill" id="hp-me-fill" style="width:100%"></div></div>
   </div>
-
-  <!-- Countdown overlay -->
-  <div id="countdownOverlay" class="hidden">
-    <span id="countdownNum"></span>
+  <div class="hud-corner" id="hud-opp">
+    <span class="hud-label">OPP — LAP</span>
+    <span class="hud-val" id="hud-opp-lap">0/3</span>
+    <span class="hud-label">HP</span>
+    <div class="hp-track"><div class="hp-fill" id="hp-opp-fill" style="width:100%"></div></div>
   </div>
+</div>
 
-  <!-- Finish overlay -->
-  <div id="finishOverlay" class="hidden">
-    <div class="finish-box">
-      <h2 id="finishTitle"></h2>
-      <p id="finishSub"></p>
-    </div>
-  </div>
+<!-- Canvas -->
+<canvas id="canvas"></canvas>
 
-  <!-- Game -->
-  <canvas id="gameCanvas" class="hidden"></canvas>
-
-  <!-- HUD -->
-  <div id="hud" class="hidden">
-    <div class="hud-left">
-      <div class="hud-block">
-        <span class="hud-label">LAP</span>
-        <span class="hud-value" id="hudLap">0 / 3</span>
-      </div>
-      <div class="hud-block">
-        <span class="hud-label">HP</span>
-        <div class="hp-bar-wrap"><div class="hp-bar" id="hudHp"></div></div>
-      </div>
-    </div>
-    <div class="hud-right">
-      <div class="hud-block small">
-        <span class="hud-label">OPP HP</span>
-        <div class="hp-bar-wrap"><div class="hp-bar opp" id="hudOppHp"></div></div>
-      </div>
-      <div class="hud-block small">
-        <span class="hud-label">OPP LAP</span>
-        <span class="hud-value small" id="hudOppLap">0 / 3</span>
-      </div>
-    </div>
-  </div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="game.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
 </body>
 </html>

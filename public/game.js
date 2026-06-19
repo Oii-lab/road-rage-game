@@ -1,364 +1,419 @@
-// ─── Socket ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+//  SOCKET
+// ═══════════════════════════════════════════════════════
 const socket = io();
 
-// ─── State ─────────────────────────────────────────────────────────────────
-let myId = null;
-let myIndex = null;
-let roomId = null;
-let trackInfo = null;
-let CANVAS_W = 1200;
-let CANVAS_H = 700;
+// ═══════════════════════════════════════════════════════
+//  GLOBAL STATE
+// ═══════════════════════════════════════════════════════
+let myId    = null;
+let myIdx   = null;
+let WW      = 1200;
+let HH      = 700;
+let track   = null;   // { pts, roadWidth, W, H, checkpointIdx }
+let phase   = 'lobby'; // lobby | waiting | countdown | racing | finished
+let lastState = null;
 
-// rendering is always on once we get gameState
-let renderActive = false;
-// input only sent when racing
-let raceActive = false;
+const keys  = {};
+let prevInput = '';
 
-const keys = {};
-let lastInput = {};
-
+// Particles
 const particles = [];
 
-// ─── DOM ────────────────────────────────────────────────────────────────────
-const lobby         = document.getElementById('lobby');
-const waiting       = document.getElementById('waiting');
-const waitingRoomId = document.getElementById('waitingRoomId');
-const countdownOvl  = document.getElementById('countdownOverlay');
-const countdownNum  = document.getElementById('countdownNum');
-const finishOverlay = document.getElementById('finishOverlay');
-const finishTitle   = document.getElementById('finishTitle');
-const finishSub     = document.getElementById('finishSub');
-const canvas        = document.getElementById('gameCanvas');
-const hud           = document.getElementById('hud');
-const hudLap        = document.getElementById('hudLap');
-const hudHp         = document.getElementById('hudHp');
-const hudOppLap     = document.getElementById('hudOppLap');
-const hudOppHp      = document.getElementById('hudOppHp');
-const joinBtn       = document.getElementById('joinBtn');
-const roomInput     = document.getElementById('roomInput');
+// ═══════════════════════════════════════════════════════
+//  DOM REFS
+// ═══════════════════════════════════════════════════════
+const sLobby     = document.getElementById('s-lobby');
+const sWaiting   = document.getElementById('s-waiting');
+const sCountdown = document.getElementById('s-countdown');
+const sFinish    = document.getElementById('s-finish');
+const tagRoom    = document.getElementById('tag-room');
+const cdNum      = document.getElementById('cd-num');
+const finTitle   = document.getElementById('finish-title');
+const finSub     = document.getElementById('finish-sub');
+const btnJoin    = document.getElementById('btn-join');
+const btnRematch = document.getElementById('btn-rematch');
+const inpRoom    = document.getElementById('inp-room');
+const canvas     = document.getElementById('canvas');
+const hud        = document.getElementById('hud');
+const elLap      = document.getElementById('hud-lap');
+const elOppLap   = document.getElementById('hud-opp-lap');
+const elHpMe     = document.getElementById('hp-me-fill');
+const elHpOpp    = document.getElementById('hp-opp-fill');
 
 const ctx = canvas.getContext('2d');
 
-// ─── Canvas sizing ──────────────────────────────────────────────────────────
-function resizeCanvas() {
-  const scaleX = window.innerWidth  / CANVAS_W;
-  const scaleY = window.innerHeight / CANVAS_H;
-  const scale  = Math.min(scaleX, scaleY);
-  canvas.style.width  = (CANVAS_W * scale) + 'px';
-  canvas.style.height = (CANVAS_H * scale) + 'px';
+// ═══════════════════════════════════════════════════════
+//  CANVAS SCALE
+// ═══════════════════════════════════════════════════════
+function scaleCanvas() {
+  const sx = window.innerWidth  / WW;
+  const sy = window.innerHeight / HH;
+  const s  = Math.min(sx, sy);
+  canvas.style.width  = Math.floor(WW * s) + 'px';
+  canvas.style.height = Math.floor(HH * s) + 'px';
 }
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', scaleCanvas);
 
-// ─── Lobby ─────────────────────────────────────────────────────────────────
-joinBtn.addEventListener('click', () => {
-  const id = roomInput.value.trim().toUpperCase();
-  if (!id) return;
-  roomId = id;
-  socket.emit('joinRoom', { roomId });
-  lobby.classList.add('hidden');
-  waiting.classList.remove('hidden');
-  waitingRoomId.textContent = `ROOM: ${roomId}`;
-});
-roomInput.addEventListener('keydown', e => { if (e.key === 'Enter') joinBtn.click(); });
+// ═══════════════════════════════════════════════════════
+//  LOBBY CONTROLS
+// ═══════════════════════════════════════════════════════
+function doJoin() {
+  const room = inpRoom.value.trim().toUpperCase();
+  if (!room) return;
+  tagRoom.textContent = 'ROOM: ' + room;
+  socket.emit('join', { roomId: room });
+  show('waiting');
+}
+btnJoin.addEventListener('click', doJoin);
+inpRoom.addEventListener('keydown', e => { if (e.key === 'Enter') doJoin(); });
+btnRematch.addEventListener('click', () => location.reload());
 
-// ─── Socket Events ──────────────────────────────────────────────────────────
-socket.on('joined', ({ playerId, index, track, canvasW, canvasH }) => {
-  myId     = playerId;
-  myIndex  = index;
-  trackInfo = track;
-  CANVAS_W  = canvasW;
-  CANVAS_H  = canvasH;
-  canvas.width  = CANVAS_W;
-  canvas.height = CANVAS_H;
-  resizeCanvas();
-});
+function show(screen) {
+  sLobby    .classList.toggle('hidden', screen !== 'lobby');
+  sWaiting  .classList.toggle('hidden', screen !== 'waiting');
+  sCountdown.classList.toggle('hidden', screen !== 'countdown');
+  sFinish   .classList.toggle('hidden', screen !== 'finish');
+  phase = screen;
+}
 
-socket.on('roomFull', () => {
-  waiting.classList.add('hidden');
-  lobby.classList.remove('hidden');
-  alert('Room is full. Try a different Room ID.');
-});
-
-socket.on('countdown', (n) => {
-  countdownOvl.classList.remove('hidden');
-  countdownNum.textContent = n === 0 ? 'GO!' : n;
-  countdownNum.style.animation = 'none';
-  void countdownNum.offsetWidth;
-  countdownNum.style.animation = '';
+// ═══════════════════════════════════════════════════════
+//  SOCKET EVENTS
+// ═══════════════════════════════════════════════════════
+socket.on('joined', ({ idx, W, H }) => {
+  myIdx = idx;
+  WW = W; HH = H;
+  canvas.width  = WW;
+  canvas.height = HH;
+  scaleCanvas();
+  // Don't need to reassign myId here — do it on first state frame
 });
 
-socket.on('raceStart', () => {
-  countdownOvl.classList.add('hidden');
-  raceActive = true;
+socket.on('full', () => {
+  show('lobby');
+  alert('Room full — try a different ID.');
 });
 
-socket.on('gameState', (state) => {
-  // Show canvas on first frame (even during countdown)
-  if (!renderActive) {
-    renderActive = true;
-    waiting.classList.add('hidden');
-    canvas.classList.remove('hidden');
-    hud.classList.remove('hidden');
+socket.on('waiting', count => {
+  // Still waiting for 2nd player if count === 1
+  if (count < 2) show('waiting');
+});
+
+socket.on('countdown', n => {
+  show('countdown');
+  cdNum.textContent = n === 0 ? 'GO!' : String(n);
+  // Reset animation
+  cdNum.style.animation = 'none';
+  void cdNum.offsetWidth;
+  cdNum.style.animation = '';
+});
+
+socket.on('go', () => {
+  sCountdown.classList.add('hidden');
+  phase = 'racing';
+  hud.style.display = 'block';
+});
+
+socket.on('state', st => {
+  // Latch our socket id from first frame
+  if (!myId) {
+    // find which player has our socket id... we know our idx
+    const me = st.players.find(p => p.idx === myIdx);
+    if (me) myId = me.id;
   }
 
-  renderFrame(state);
-  updateHUD(state);
+  lastState = st;
 
-  if (state.state === 'finished' && raceActive) {
-    raceActive = false;
-    showFinish(state);
+  // Show canvas on first state (even during countdown so cars are visible)
+  canvas.style.display = 'block';
+
+  render(st);
+  updateHUD(st);
+
+  if (st.state === 'finished' && phase !== 'finish') {
+    phase = 'finish';
+    setTimeout(() => showFinish(st), 600);
   }
 });
 
 socket.on('opponentLeft', () => {
-  raceActive = false;
-  finishTitle.textContent = 'OPPONENT LEFT';
-  finishSub.textContent   = 'The race has ended.';
-  finishOverlay.classList.remove('hidden');
+  finTitle.textContent = 'OPPONENT LEFT';
+  finSub.textContent   = '';
+  show('finish');
 });
 
-// ─── Input ──────────────────────────────────────────────────────────────────
-document.addEventListener('keydown', e => { keys[e.code] = true; e.preventDefault(); });
-document.addEventListener('keyup',   e => { keys[e.code] = false; });
+// ═══════════════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))
+    e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
 
 setInterval(() => {
-  if (!raceActive) return;
-  const input = {
-    up:    !!(keys['KeyW'] || keys['ArrowUp']),
-    down:  !!(keys['KeyS'] || keys['ArrowDown']),
-    left:  !!(keys['KeyA'] || keys['ArrowLeft']),
-    right: !!(keys['KeyD'] || keys['ArrowRight']),
-    item:  !!(keys['Space'] || keys['KeyZ']),
+  if (phase !== 'racing') return;
+  const inp = {
+    up:    !!(keys.KeyW || keys.ArrowUp),
+    down:  !!(keys.KeyS || keys.ArrowDown),
+    left:  !!(keys.KeyA || keys.ArrowLeft),
+    right: !!(keys.KeyD || keys.ArrowRight),
   };
-  if (JSON.stringify(input) !== JSON.stringify(lastInput)) {
-    lastInput = input;
-    socket.emit('input', input);
-  }
+  const s = JSON.stringify(inp);
+  if (s !== prevInput) { prevInput = s; socket.emit('input', inp); }
 }, 16);
 
-// ─── Rendering ──────────────────────────────────────────────────────────────
-function renderFrame(state) {
-  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-  drawBackground();
-  if (trackInfo) drawTrack();
-  drawStartLine();
-  updateParticles();
+// ═══════════════════════════════════════════════════════
+//  RENDERING
+// ═══════════════════════════════════════════════════════
+function render(st) {
+  ctx.clearRect(0, 0, WW, HH);
+  drawBG();
+  if (st.track) {
+    track = st.track;
+    drawTrack(track);
+  }
+  tickParticles();
   drawParticles();
-  for (const p of state.players) drawCar(p, state.state === 'racing' || state.state === 'finished');
+  for (const p of st.players) drawCar(p);
 }
 
-function drawBackground() {
-  // Dark grass
-  ctx.fillStyle = '#151a10';
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-}
-
-function drawTrack() {
-  const { cx, cy, outerRx, outerRy, innerRx, innerRy } = trackInfo;
-
-  // ── Asphalt fill ──
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, outerRx, outerRy, 0, 0, Math.PI * 2);
-  ctx.fillStyle = '#282828';
-  ctx.fill();
-
-  // ── Inner grass ──
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, innerRx, innerRy, 0, 0, Math.PI * 2);
-  ctx.fillStyle = '#1b2214';
-  ctx.fill();
-
-  // ── Rumble strips ──
-  drawRumbleStrips(cx, cy, outerRx, outerRy,  14, false);
-  drawRumbleStrips(cx, cy, innerRx, innerRy, -14, true);
-
-  // ── White edge lines ──
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, outerRx, outerRy, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, innerRx, innerRy, 0, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // ── Dashed center line ──
-  ctx.setLineDash([18, 14]);
-  ctx.strokeStyle = 'rgba(255,255,180,0.22)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, (outerRx + innerRx) / 2, (outerRy + innerRy) / 2, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-}
-
-function drawRumbleStrips(cx, cy, rx, ry, thickness, inward) {
-  const steps = 60;
-  const sign = inward ? -1 : 1;
-  const irx = rx + sign * Math.abs(thickness);
-  const iry = ry + sign * Math.abs(thickness);
-
-  for (let i = 0; i < steps; i++) {
-    if (i % 2 !== 0) continue; // only alternate segments
-    const a1 = (i / steps) * Math.PI * 2;
-    const a2 = ((i + 1) / steps) * Math.PI * 2;
-
-    ctx.beginPath();
-    ctx.moveTo(cx + rx  * Math.cos(a1), cy + ry  * Math.sin(a1));
-    ctx.lineTo(cx + irx * Math.cos(a1), cy + iry * Math.sin(a1));
-    ctx.lineTo(cx + irx * Math.cos(a2), cy + iry * Math.sin(a2));
-    ctx.lineTo(cx + rx  * Math.cos(a2), cy + ry  * Math.sin(a2));
-    ctx.closePath();
-    ctx.fillStyle = '#cc2222';
-    ctx.fill();
+// ── Background: pixel checkerboard dirt ──
+function drawBG() {
+  const S = 40;
+  for (let r = 0; r < HH / S + 1; r++) {
+    for (let c = 0; c < WW / S + 1; c++) {
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#141810' : '#111510';
+      ctx.fillRect(c * S, r * S, S, S);
+    }
   }
 }
 
-function drawStartLine() {
-  if (!trackInfo) return;
-  const { cx, cy, outerRx, innerRx } = trackInfo;
-  const x1 = cx + innerRx;
-  const x2 = cx + outerRx;
-  const stripeH = 8;
-  const stripeCount = 8;
-  const totalH = stripeCount * stripeH;
-  const startY = cy - totalH / 2;
+// ── Track: draw each segment as a thick road ──
+function drawTrack(t) {
+  const { pts, roadWidth } = t;
+  const rw = roadWidth;
 
-  for (let i = 0; i < stripeCount; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#000000';
-    ctx.fillRect(x1, startY + i * stripeH, x2 - x1, stripeH);
-  }
-
-  ctx.fillStyle = 'rgba(255,230,80,0.85)';
-  ctx.font = 'bold 10px "Courier New"';
-  ctx.textAlign = 'center';
-  ctx.fillText('START / FINISH', (x1 + x2) / 2, startY - 6);
-}
-
-// ─── Car ─────────────────────────────────────────────────────────────────────
-function drawCar(p, moving) {
-  ctx.save();
-  ctx.translate(p.x, p.y);
-  ctx.rotate(p.angle + Math.PI / 2);
-
-  const r = p.radius;
-  const isMe = p.id === myId;
-  const bw = r * 1.4, bh = r * 2.2;
+  // ─ Road fill (multiple passes for thick pixel look) ─
+  ctx.lineCap  = 'round';
+  ctx.lineJoin = 'round';
 
   // Shadow
-  ctx.beginPath();
-  ctx.ellipse(3, 4, r * 1.1, r * 0.65, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.fill();
+  ctx.strokeStyle = '#000000aa';
+  ctx.lineWidth   = rw * 2 + 12;
+  drawPath(pts, true);
 
-  // Body
-  ctx.fillStyle = p.color;
-  rrFill(ctx, -bw/2, -bh/2, bw, bh, 5);
+  // Asphalt
+  ctx.strokeStyle = '#2d2d2d';
+  ctx.lineWidth   = rw * 2;
+  drawPath(pts, true);
 
-  // Windshield
-  ctx.fillStyle = isMe ? 'rgba(160,210,255,0.75)' : 'rgba(120,170,210,0.5)';
-  rrFill(ctx, -bw*0.36, -bh*0.36, bw*0.72, bh*0.28, 3);
+  // Centre dash
+  ctx.setLineDash([20, 16]);
+  ctx.strokeStyle = '#ffcc0044';
+  ctx.lineWidth   = 3;
+  drawPath(pts, true);
+  ctx.setLineDash([]);
 
-  // Wheels
-  ctx.fillStyle = '#111';
-  const wy = bh * 0.26;
-  rrFill(ctx, -bw*0.7,    -wy - 7, 9, 14, 2);
-  rrFill(ctx,  bw*0.7 - 9,-wy - 7, 9, 14, 2);
-  rrFill(ctx, -bw*0.7,     wy - 7, 9, 14, 2);
-  rrFill(ctx,  bw*0.7 - 9, wy - 7, 9, 14, 2);
+  // Edge lines (white pixel stripes)
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth   = 4;
+  // Offset lines not trivial for curves — draw approximate border by using
+  // slightly wider stroke then asphalt on top
+  ctx.strokeStyle = '#555555';
+  ctx.lineWidth   = rw * 2 + 6;
+  drawPath(pts, true);
+  ctx.strokeStyle = '#2d2d2d';
+  ctx.lineWidth   = rw * 2;
+  drawPath(pts, true);
 
-  // HP ring
-  const hpFrac = Math.max(0, p.hp / 100);
-  ctx.beginPath();
-  ctx.arc(0, 0, r + 5, -Math.PI/2, -Math.PI/2 + hpFrac * Math.PI * 2);
-  ctx.strokeStyle = hpFrac > 0.5 ? '#44ff88' : hpFrac > 0.25 ? '#ffcc00' : '#ff3333';
-  ctx.lineWidth = 2.5;
-  ctx.stroke();
+  // Redraw white edge as outer border
+  ctx.strokeStyle = '#cccccc';
+  ctx.lineWidth   = rw * 2 + 6;
+  drawPath(pts, true);
+  ctx.strokeStyle = '#2d2d2d';
+  ctx.lineWidth   = rw * 2 - 4;
+  drawPath(pts, true);
 
-  ctx.restore();
+  // ─ Checkpoint markers ─
+  const cpColors = ['#ff9900', '#00ffcc', '#ff3366'];
+  for (let i = 0; i < t.checkpointIdx.length; i++) {
+    const wp = pts[t.checkpointIdx[i]];
+    // Draw dashed gate line perpendicular to road
+    const prev = pts[(t.checkpointIdx[i] - 1 + pts.length) % pts.length];
+    const next = pts[(t.checkpointIdx[i] + 1) % pts.length];
+    const dx = next.x - prev.x, dy = next.y - prev.y;
+    const len = Math.hypot(dx, dy);
+    const px = -dy/len * rw, py = dx/len * rw;
 
-  // "YOU" label
-  if (isMe) {
     ctx.save();
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.font = 'bold 9px "Courier New"';
-    ctx.textAlign = 'center';
-    // label is above car in world space (not rotated)
-    ctx.fillText('YOU', p.x, p.y - r - 10);
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = cpColors[i];
+    ctx.lineWidth   = 3;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(wp.x - px, wp.y - py);
+    ctx.lineTo(wp.x + px, wp.y + py);
+    ctx.stroke();
     ctx.restore();
   }
 
-  // Exhaust particles (only for local player when accelerating)
-  if (isMe && moving && lastInput.up) {
-    const tailAngle = p.angle + Math.PI;
+  // ─ Start/finish line ─
+  const sf = pts[0];
+  const sfNext = pts[1];
+  const sfDx = sfNext.x - sf.x, sfDy = sfNext.y - sf.y;
+  const sfLen = Math.hypot(sfDx, sfDy);
+  const sfPx = -sfDy/sfLen * rw, sfPy = sfDx/sfLen * rw;
+
+  const stripes = 8, sw = (rw * 2) / stripes;
+  ctx.save();
+  ctx.translate(sf.x, sf.y);
+  // Rotate so stripes go across the road
+  ctx.rotate(Math.atan2(sfDy, sfDx) + Math.PI/2);
+  for (let i = 0; i < stripes; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#111111';
+    ctx.fillRect(-rw + i * sw, -6, sw, 12);
+  }
+  ctx.restore();
+
+  // "START" label
+  ctx.save();
+  ctx.font = 'bold 10px "Courier New"';
+  ctx.fillStyle = '#ffcc00';
+  ctx.textAlign = 'center';
+  ctx.fillText('START', sf.x, sf.y - rw - 8);
+  ctx.restore();
+}
+
+function drawPath(pts, closed) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  if (closed) ctx.closePath();
+  ctx.stroke();
+}
+
+// ── Car: pixel box, angle=0 faces RIGHT ──
+function drawCar(p) {
+  const isMe = (p.id === myId);
+  const cw = 22, ch = 36;
+
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(p.angle);   // angle=0 → faces right (positive X), standard canvas
+
+  // Pixel shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(-cw/2 + 3, -ch/2 + 4, cw, ch);
+
+  // Body
+  ctx.fillStyle = p.color;
+  ctx.fillRect(-cw/2, -ch/2, cw, ch);
+
+  // Windshield (lighter rect near front — front = positive Y after rotation)
+  ctx.fillStyle = isMe ? 'rgba(200,240,255,0.8)' : 'rgba(160,200,230,0.6)';
+  ctx.fillRect(-cw/2 + 3, -ch/2 + 3, cw - 6, ch * 0.32);
+
+  // Wheels (4 dark rects)
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-cw/2 - 5, -ch/2 + 4,  6, 10);  // front-left
+  ctx.fillRect( cw/2 - 1, -ch/2 + 4,  6, 10);  // front-right
+  ctx.fillRect(-cw/2 - 5,  ch/2 - 14, 6, 10);  // rear-left
+  ctx.fillRect( cw/2 - 1,  ch/2 - 14, 6, 10);  // rear-right
+
+  // Pixel border
+  ctx.strokeStyle = isMe ? '#ffffff' : '#aaaaaa';
+  ctx.lineWidth   = 2;
+  ctx.strokeRect(-cw/2, -ch/2, cw, ch);
+
+  ctx.restore();
+
+  // HP bar (always horizontal, above car)
+  const barW = 36, barH = 5;
+  const hpFrac = Math.max(0, p.hp / 100);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(p.x - barW/2, p.y - ch/2 - 12, barW, barH);
+  ctx.fillStyle = hpFrac > 0.5 ? '#33ff66' : hpFrac > 0.25 ? '#ffcc00' : '#ff3333';
+  ctx.fillRect(p.x - barW/2, p.y - ch/2 - 12, barW * hpFrac, barH);
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(p.x - barW/2, p.y - ch/2 - 12, barW, barH);
+
+  // "YOU" tag
+  if (isMe) {
+    ctx.fillStyle = '#ffffff';
+    ctx.font      = 'bold 8px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillText('YOU', p.x, p.y - ch/2 - 16);
+  }
+
+  // Exhaust particle when thrusting
+  if (isMe && keys.KeyW || keys.ArrowUp) {
+    const back = p.angle + Math.PI;
     spawnParticle(
-      p.x + Math.cos(tailAngle) * r,
-      p.y + Math.sin(tailAngle) * r,
-      Math.cos(tailAngle) * (0.8 + Math.random() * 0.8) + (Math.random()-0.5)*0.5,
-      Math.sin(tailAngle) * (0.8 + Math.random() * 0.8) + (Math.random()-0.5)*0.5,
-      '#888', 4
+      p.x + Math.cos(back) * ch/2,
+      p.y + Math.sin(back) * ch/2,
+      Math.cos(back) * (0.6 + Math.random()) + (Math.random()-.5)*.6,
+      Math.sin(back) * (0.6 + Math.random()) + (Math.random()-.5)*.6,
+      '#888866', 4 + Math.random() * 2
     );
   }
 }
 
-// roundRect polyfill — never use native API
-function rrFill(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y,     x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h,     x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y,         x + r, y);
-  ctx.closePath();
-  ctx.fill();
-}
-
-// ─── Particles ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+//  PARTICLES
+// ═══════════════════════════════════════════════════════
 function spawnParticle(x, y, vx, vy, color, size) {
+  if (particles.length > 120) return;
   particles.push({ x, y, vx, vy, color, size, life: 1 });
 }
-function updateParticles() {
+function tickParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.x += p.vx; p.y += p.vy;
-    p.life -= 0.07; p.size *= 0.91;
+    p.life -= 0.055; p.size *= 0.93;
     if (p.life <= 0) particles.splice(i, 1);
   }
 }
 function drawParticles() {
   for (const p of particles) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-    ctx.fillStyle = p.color + Math.floor(p.life * 200).toString(16).padStart(2,'0');
-    ctx.fill();
+    ctx.globalAlpha = p.life * 0.8;
+    ctx.fillStyle   = p.color;
+    ctx.fillRect(Math.round(p.x - p.size/2), Math.round(p.y - p.size/2),
+                 Math.round(p.size), Math.round(p.size));
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ═══════════════════════════════════════════════════════
+//  HUD
+// ═══════════════════════════════════════════════════════
+function updateHUD(st) {
+  const me  = st.players.find(p => p.id === myId);
+  const opp = st.players.find(p => p.id !== myId);
+  if (me) {
+    elLap.textContent       = `${me.lap}/3`;
+    elHpMe.style.width      = `${me.hp}%`;
+  }
+  if (opp) {
+    elOppLap.textContent    = `${opp.lap}/3`;
+    elHpOpp.style.width     = `${opp.hp}%`;
   }
 }
 
-// ─── HUD ─────────────────────────────────────────────────────────────────────
-function updateHUD(state) {
-  const me  = state.players.find(p => p.id === myId);
-  const opp = state.players.find(p => p.id !== myId);
-  if (me)  { hudLap.textContent    = `${me.lap} / 3`;  hudHp.style.width    = `${me.hp}%`;  }
-  if (opp) { hudOppLap.textContent = `${opp.lap} / 3`; hudOppHp.style.width = `${opp.hp}%`; }
-}
-
-// ─── Finish ───────────────────────────────────────────────────────────────────
-function showFinish(state) {
-  const me  = state.players.find(p => p.id === myId);
-  const opp = state.players.find(p => p.id !== myId);
-  let title, sub;
+function showFinish(st) {
+  const me  = st.players.find(p => p.id === myId);
+  const opp = st.players.find(p => p.id !== myId);
+  let title = 'RACE OVER', sub = '';
   if (me?.finished && (!opp?.finished || me.finishTime <= opp.finishTime)) {
-    title = '🏆 YOU WIN'; sub = 'Race Complete';
+    title = '🏆 YOU WIN!'; sub = '3 LAPS COMPLETE';
   } else if (me?.hp <= 0) {
-    title = '💥 DNF'; sub = 'Vehicle Destroyed';
-  } else {
-    title = 'OPPONENT WINS'; sub = 'Better luck next time';
+    title = '💥 DNF'; sub = 'DESTROYED';
+  } else if (opp?.finished) {
+    title = 'YOU LOSE'; sub = 'OPPONENT WINS';
   }
-  finishTitle.textContent = title;
-  finishSub.textContent   = sub;
-  finishOverlay.classList.remove('hidden');
+  finTitle.textContent = title;
+  finSub.textContent   = sub;
+  show('finish');
 }
