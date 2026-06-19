@@ -108,7 +108,8 @@ body {
   position: fixed;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  background: #0a0a0f;
+  background: #151a10;
+  image-rendering: crisp-edges;
 }
 
 /* ── Countdown Overlay ── */
