@@ -9,95 +9,110 @@ const io     = new Server(server, { cors: { origin: '*' } });
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ═══════════════════════════════════════════════════════
-//  WORLD CONSTANTS
+//  CONSTANTS
 // ═══════════════════════════════════════════════════════
 const W = 1200, H = 700;
-const ROAD_WIDTH  = 110;   // half-width of track corridor
-const MAX_LAPS    = 3;
-const TICK        = 1000 / 60;
+const ROAD_W   = 90;   // half-width of road corridor
+const MAX_LAPS = 3;
+const TICK     = 1000 / 60;
 
-const CAR_W       = 22;
-const CAR_H       = 36;
-const ACCEL       = 0.32;
-const BRAKE       = 0.22;
-const TURN        = 0.048;   // rad/tick
-const FRICTION    = 0.96;
-const OFF_FRICTION= 0.88;
-const MAX_SPEED   = 10;
+const ACCEL      = 0.30;
+const BRAKE      = 0.20;
+const TURN       = 0.045;
+const FRICTION   = 0.965;
+const OFF_FR     = 0.87;
+const MAX_SPEED  = 9;
+const CAR_R      = 14;  // collision circle radius
 
 // ═══════════════════════════════════════════════════════
-//  TRACK  —  Figure-8 waypoints (centre-line)
-//  Waypoints go: right loop (CW) → crossover → left loop (CW)
+//  TRACK — simple oval with one chicane
+//  All points are CENTRE-LINE, travel direction: index 0 → 1 → 2 → ... → 0
+//  Visualised as closed polyline with ROAD_W half-width
 // ═══════════════════════════════════════════════════════
 const TRACK_PTS = [
-  // ── right loop ──
-  { x: 820, y: 350 },   // 0  start/finish
-  { x: 960, y: 260 },   // 1
-  { x: 1080,y: 200 },   // 2
-  { x: 1130,y: 350 },   // 3
-  { x: 1080,y: 500 },   // 4
-  { x: 960, y: 560 },   // 5
-  { x: 820, y: 500 },   // 6
-  // ── crossover ──
-  { x: 640, y: 420 },   // 7
-  { x: 560, y: 350 },   // 8  (centre cross)
-  { x: 640, y: 280 },   // 9
-  // ── left loop ──
-  { x: 820, y: 200 },   // 10
-  { x: 380, y: 200 },   // 11
-  { x: 200, y: 260 },   // 12
-  { x: 120, y: 350 },   // 13
-  { x: 200, y: 440 },   // 14
-  { x: 380, y: 500 },   // 15
-  { x: 560, y: 460 },   // 16
-  { x: 640, y: 420 },   // back to 7 area → closes loop
+  { x: 900, y: 350 },  //  0  start/finish (right side)
+  { x: 980, y: 240 },  //  1
+  { x: 1050,y: 160 },  //  2
+  { x: 1100,y: 350 },  //  3  rightmost point
+  { x: 1050,y: 540 },  //  4
+  { x: 980, y: 610 },  //  5
+  { x: 850, y: 620 },  //  6
+  { x: 680, y: 580 },  //  7  bottom-right chicane entry
+  { x: 600, y: 530 },  //  8  chicane dip
+  { x: 520, y: 580 },  //  9  chicane exit
+  { x: 340, y: 590 },  // 10
+  { x: 160, y: 530 },  // 11
+  { x:  90, y: 350 },  // 12  leftmost
+  { x: 160, y: 170 },  // 13
+  { x: 340, y: 110 },  // 14
+  { x: 560, y: 120 },  // 15
+  { x: 680, y: 160 },  // 16
+  { x: 760, y: 250 },  // 17
+  { x: 820, y: 350 },  // 18  back near start
 ];
-// Checkpoint indices (must pass these IN ORDER before crossing start)
-const CHECKPOINT_IDX = [3, 8, 13];   // right-tip, cross, left-tip
 
-// ── Precompute segment normals & lengths for isOnTrack ──
-function segData(pts) {
+// Checkpoints: gate indices the player must cross in order each lap
+// (use 3 well-spread points)
+const CP = [3, 8, 12];  // right tip, chicane, left tip
+
+// ─── Segment helper ───────────────────────────────────
+function buildSegs(pts) {
   const segs = [];
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i], b = pts[(i + 1) % pts.length];
     const dx = b.x - a.x, dy = b.y - a.y;
-    const len = Math.sqrt(dx*dx + dy*dy);
-    segs.push({ ax: a.x, ay: a.y, dx, dy, len });
+    const len = Math.hypot(dx, dy);
+    segs.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, dx, dy, len });
   }
   return segs;
 }
-const SEGS = segData(TRACK_PTS);
+const SEGS = buildSegs(TRACK_PTS);
 
-// Distance from point P to line segment AB
 function distToSeg(px, py, s) {
-  const t = Math.max(0, Math.min(1, ((px-s.ax)*s.dx + (py-s.ay)*s.dy) / (s.len*s.len)));
-  const cx = s.ax + t*s.dx, cy = s.ay + t*s.dy;
-  const dx = px-cx, dy = py-cy;
-  return Math.sqrt(dx*dx + dy*dy);
+  if (s.len < 0.001) return Math.hypot(px - s.ax, py - s.ay);
+  const t  = Math.max(0, Math.min(1, ((px-s.ax)*s.dx + (py-s.ay)*s.dy) / (s.len * s.len)));
+  return Math.hypot(px - (s.ax + t*s.dx), py - (s.ay + t*s.dy));
 }
 
 function isOnTrack(x, y) {
-  for (const s of SEGS) {
-    if (distToSeg(x, y, s) <= ROAD_WIDTH) return true;
-  }
+  for (const s of SEGS) if (distToSeg(x, y, s) <= ROAD_W) return true;
   return false;
 }
 
-// Nearest waypoint index (for checkpoint logic)
-function nearestWaypoint(x, y) {
-  let best = 0, bestD = Infinity;
-  for (let i = 0; i < TRACK_PTS.length; i++) {
-    const dx = x - TRACK_PTS[i].x, dy = y - TRACK_PTS[i].y;
-    const d = dx*dx + dy*dy;
-    if (d < bestD) { bestD = d; best = i; }
+// Progress along track: returns a float 0..N (segment index + fraction)
+// Used for lap/checkpoint logic — avoids angle-based bugs
+function trackProgress(x, y) {
+  let bestSeg = 0, bestT = 0, bestD = Infinity;
+  for (let i = 0; i < SEGS.length; i++) {
+    const s = SEGS[i];
+    if (s.len < 0.001) continue;
+    const t = Math.max(0, Math.min(1, ((x-s.ax)*s.dx + (y-s.ay)*s.dy) / (s.len * s.len)));
+    const d = Math.hypot(x - (s.ax + t*s.dx), y - (s.ay + t*s.dy));
+    if (d < bestD) { bestD = d; bestSeg = i; bestT = t; }
   }
-  return best;
+  return bestSeg + bestT;  // e.g. 3.7 = 70% along segment 3
 }
 
-// ── Spawn: just before start/finish (wp 0), staggered side by side ──
+// ─── Spawns: just behind start line, side by side ────
+//   Start/finish is between pt 18 and pt 0, facing toward pt 1 (up-right)
+//   angle = atan2(pt1.y - pt0.y, pt1.x - pt0.x) ≈ direction of travel
+const startAngle = Math.atan2(
+  TRACK_PTS[1].y - TRACK_PTS[0].y,
+  TRACK_PTS[1].x - TRACK_PTS[0].x
+);
+// Perpendicular (sideways) to lane them
+const perpAngle = startAngle + Math.PI / 2;
 const SPAWNS = [
-  { x: 820, y: 330, angle: Math.PI },   // P1  facing left (direction of travel)
-  { x: 820, y: 370, angle: Math.PI },   // P2
+  {
+    x: TRACK_PTS[0].x + Math.cos(perpAngle) * 28,
+    y: TRACK_PTS[0].y + Math.sin(perpAngle) * 28,
+    angle: startAngle,
+  },
+  {
+    x: TRACK_PTS[0].x - Math.cos(perpAngle) * 28,
+    y: TRACK_PTS[0].y - Math.sin(perpAngle) * 28,
+    angle: startAngle,
+  },
 ];
 
 // ═══════════════════════════════════════════════════════
@@ -107,7 +122,7 @@ const rooms = new Map();
 
 function makePlayer(id, idx) {
   const sp = SPAWNS[idx];
-  console.log(`[spawn] P${idx} at (${sp.x}, ${sp.y}) onTrack=${isOnTrack(sp.x, sp.y)}`);
+  console.log(`[spawn] P${idx} at (${sp.x.toFixed(0)},${sp.y.toFixed(0)}) angle=${sp.angle.toFixed(2)} onTrack=${isOnTrack(sp.x, sp.y)}`);
   return {
     id, idx,
     x: sp.x, y: sp.y,
@@ -115,7 +130,10 @@ function makePlayer(id, idx) {
     vx: 0, vy: 0,
     hp: 100,
     lap: 0,
-    cpHit: [],           // which checkpoints hit this lap
+    // Checkpoint tracking: which CP gates hit this lap (by index into CP array)
+    cpHit: new Array(CP.length).fill(false),
+    // Progress gating: track the "last progress" to detect forward crossing of start line
+    prevProgress: null,
     finished: false,
     finishTime: null,
     color: idx === 0 ? '#FF3366' : '#33CCFF',
@@ -124,7 +142,7 @@ function makePlayer(id, idx) {
 }
 
 function makeRoom(id) {
-  return { id, players: new Map(), state:'waiting', loop: null };
+  return { id, players: new Map(), state: 'waiting', loop: null };
 }
 
 // ═══════════════════════════════════════════════════════
@@ -133,16 +151,13 @@ function makeRoom(id) {
 function tickPlayer(p) {
   const spd = Math.hypot(p.vx, p.vy);
 
-  // Steering
-  if (spd > 0.4) {
-    // Determine forward/reverse to flip steering when reversing
-    const fwd = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
+  if (spd > 0.3) {
+    const fwd  = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
     const sign = fwd >= 0 ? 1 : -1;
     if (p.input.left)  p.angle -= TURN * sign;
     if (p.input.right) p.angle += TURN * sign;
   }
 
-  // Thrust
   if (p.input.up) {
     p.vx += Math.cos(p.angle) * ACCEL;
     p.vy += Math.sin(p.angle) * ACCEL;
@@ -152,54 +167,68 @@ function tickPlayer(p) {
     p.vy -= Math.sin(p.angle) * BRAKE;
   }
 
-  // Friction
-  const fr = isOnTrack(p.x, p.y) ? FRICTION : OFF_FRICTION;
+  const fr = isOnTrack(p.x, p.y) ? FRICTION : OFF_FR;
   p.vx *= fr;
   p.vy *= fr;
 
-  // Speed cap
-  const s2 = Math.hypot(p.vx, p.vy);
-  if (s2 > MAX_SPEED) { p.vx *= MAX_SPEED/s2; p.vy *= MAX_SPEED/s2; }
+  const s = Math.hypot(p.vx, p.vy);
+  if (s > MAX_SPEED) { p.vx *= MAX_SPEED/s; p.vy *= MAX_SPEED/s; }
 
   p.x += p.vx;
   p.y += p.vy;
-
-  // World bounds (hard clamp)
-  p.x = Math.max(10, Math.min(W-10, p.x));
-  p.y = Math.max(10, Math.min(H-10, p.y));
+  p.x = Math.max(5, Math.min(W-5, p.x));
+  p.y = Math.max(5, Math.min(H-5, p.y));
 }
 
+// ─── Checkpoint & lap logic ───────────────────────────
 function tickCheckpoint(p) {
   if (p.finished) return;
-  const wp = nearestWaypoint(p.x, p.y);
-  const cpIdx = CHECKPOINT_IDX.indexOf(wp);
 
-  // Hit a required checkpoint?
-  if (cpIdx !== -1 && !p.cpHit.includes(cpIdx)) {
-    // Must hit in order
-    if (cpIdx === 0 || p.cpHit.includes(cpIdx - 1)) {
-      p.cpHit.push(cpIdx);
+  const prog = trackProgress(p.x, p.y);
+
+  // Check each required gate
+  for (let i = 0; i < CP.length; i++) {
+    if (p.cpHit[i]) continue;
+    const gateProg = CP[i];  // which segment index the gate sits on
+    // Within ±1.5 segments of the gate?
+    if (Math.abs(prog - gateProg) < 1.5) {
+      // Must hit in order
+      if (i === 0 || p.cpHit[i-1]) {
+        p.cpHit[i] = true;
+        console.log(`[cp] P${p.idx} hit checkpoint ${i}`);
+      }
     }
   }
 
-  // Cross start/finish (near wp 0) after all checkpoints hit?
-  const dx = p.x - TRACK_PTS[0].x, dy = p.y - TRACK_PTS[0].y;
-  if (Math.hypot(dx, dy) < ROAD_WIDTH * 0.8 &&
-      p.cpHit.length === CHECKPOINT_IDX.length) {
-    p.lap++;
-    p.cpHit = [];
-    if (p.lap >= MAX_LAPS) {
-      p.finished = true;
-      p.finishTime = Date.now();
+  // Crossed start/finish? (progress wraps from ~N back to ~0)
+  // Detect: was near end of track last tick, now near start
+  if (p.prevProgress !== null) {
+    const N = SEGS.length;
+    const wasNearEnd   = p.prevProgress > N - 2;
+    const isNearStart  = prog < 2;
+    const allCpHit     = p.cpHit.every(v => v);
+
+    if (wasNearEnd && isNearStart && allCpHit) {
+      p.lap++;
+      p.cpHit = new Array(CP.length).fill(false);
+      console.log(`[lap] P${p.idx} completed lap ${p.lap}`);
+      if (p.lap >= MAX_LAPS) {
+        p.finished = true;
+        p.finishTime = Date.now();
+        console.log(`[finish] P${p.idx} wins!`);
+      }
     }
   }
+
+  p.prevProgress = prog;
 }
 
+// ─── Car collision ────────────────────────────────────
 function resolveCollision(a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
   const dist = Math.hypot(dx, dy);
-  const minD = CAR_W * 2.2;
-  if (dist > minD || dist < 0.1) return;
+  const minD = CAR_R * 2.5;
+  if (dist >= minD || dist < 0.01) return;
 
   const nx = dx/dist, ny = dy/dist;
   const overlap = (minD - dist) / 2;
@@ -207,13 +236,16 @@ function resolveCollision(a, b) {
   b.x += nx*overlap; b.y += ny*overlap;
 
   const rvx = a.vx - b.vx, rvy = a.vy - b.vy;
-  const dot = rvx*nx + rvy*ny;
+  const dot  = rvx*nx + rvy*ny;
   if (dot > 0) {
-    const imp = dot * 0.85;
+    const imp = dot * 0.8;
     a.vx -= imp*nx; a.vy -= imp*ny;
     b.vx += imp*nx; b.vy += imp*ny;
-    const dmg = Math.min(20, Math.floor(Math.abs(dot) * 5));
-    if (dmg > 1) { a.hp = Math.max(0, a.hp-dmg); b.hp = Math.max(0, b.hp-dmg); }
+    const dmg = Math.min(18, Math.floor(Math.abs(dot) * 4));
+    if (dmg > 1) {
+      a.hp = Math.max(0, a.hp - dmg);
+      b.hp = Math.max(0, b.hp - dmg);
+    }
   }
 }
 
@@ -224,19 +256,26 @@ function snapshot(room) {
   return {
     state: room.state,
     players: [...room.players.values()].map(p => ({
-      id:p.id, idx:p.idx, x:p.x, y:p.y, angle:p.angle,
-      vx:p.vx, vy:p.vy, hp:p.hp, lap:p.lap,
-      finished:p.finished, finishTime:p.finishTime, color:p.color,
+      id:p.id, idx:p.idx,
+      x:p.x, y:p.y, angle:p.angle,
+      vx:p.vx, vy:p.vy,
+      hp:p.hp, lap:p.lap,
+      finished:p.finished, finishTime:p.finishTime,
+      color:p.color,
+      cpHit: p.cpHit,
     })),
-    track: { pts: TRACK_PTS, roadWidth: ROAD_WIDTH, W, H, checkpointIdx: CHECKPOINT_IDX },
+    trackPts:  TRACK_PTS,
+    roadW:     ROAD_W,
+    cp:        CP,
+    W, H,
   };
 }
 
 function startRoom(room) {
-  let cd = 3;
-  // Push immediate state so clients see parked cars
+  // Send initial state immediately so clients see parked cars
   io.to(room.id).emit('state', snapshot(room));
 
+  let cd = 3;
   const cdTimer = setInterval(() => {
     io.to(room.id).emit('countdown', cd);
     if (cd === 0) {
@@ -248,9 +287,8 @@ function startRoom(room) {
   }, 1000);
 
   room.loop = setInterval(() => {
-    const ps = [...room.players.values()];
-
     if (room.state === 'racing') {
+      const ps = [...room.players.values()];
       for (const p of ps) {
         if (!p.finished && p.hp > 0) {
           tickPlayer(p);
@@ -259,13 +297,11 @@ function startRoom(room) {
       }
       if (ps.length === 2) resolveCollision(ps[0], ps[1]);
 
-      // End when at least 1 player done (or destroyed)
       if (ps.some(p => p.finished || p.hp <= 0)) {
         room.state = 'finished';
         clearInterval(room.loop);
       }
     }
-
     io.to(room.id).emit('state', snapshot(room));
   }, TICK);
 }
@@ -281,13 +317,13 @@ io.on('connection', socket => {
     if (!room) { room = makeRoom(roomId); rooms.set(roomId, room); }
     if (room.players.size >= 2) { socket.emit('full'); return; }
 
-    const idx = room.players.size;
+    const idx    = room.players.size;
     const player = makePlayer(socket.id, idx);
     room.players.set(socket.id, player);
     socket.join(roomId);
     socket.data.roomId = roomId;
 
-    socket.emit('joined', { idx, W, H });
+    socket.emit('joined', { idx });
     io.to(roomId).emit('waiting', room.players.size);
 
     if (room.players.size === 2) {
@@ -298,8 +334,7 @@ io.on('connection', socket => {
 
   socket.on('input', inp => {
     const room = rooms.get(socket.data.roomId);
-    if (!room) return;
-    const p = room.players.get(socket.id);
+    const p    = room?.players.get(socket.id);
     if (p) p.input = inp;
   });
 
@@ -320,4 +355,9 @@ io.on('connection', socket => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Road Rage running on :${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Road Rage on :${PORT}`);
+  console.log(`Start angle: ${startAngle.toFixed(3)} rad`);
+  console.log(`Spawns: P0(${SPAWNS[0].x.toFixed(0)},${SPAWNS[0].y.toFixed(0)}) P1(${SPAWNS[1].x.toFixed(0)},${SPAWNS[1].y.toFixed(0)})`);
+  SPAWNS.forEach((s,i) => console.log(`  P${i} onTrack: ${isOnTrack(s.x, s.y)}`));
+});
