@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: road-rage
+    env: node
+    buildCommand: npm install
+    startCommand: node server/index.js
+    plan: free

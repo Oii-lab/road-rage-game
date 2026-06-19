@@ -1,0 +1,209 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --border: #2a2a3a;
+  --accent: #ff3c3c;
+  --accent2: #3caaff;
+  --text: #e8e8f0;
+  --muted: #666680;
+  --font-display: 'Courier New', Courier, monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-display);
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hidden { display: none !important; }
+
+/* ── Lobby ── */
+#lobby, #waiting {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.lobby-inner {
+  display: flex; flex-direction: column; align-items: center; gap: 20px;
+  padding: 48px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  min-width: 320px;
+}
+
+.title {
+  font-size: 72px;
+  font-weight: 900;
+  letter-spacing: 6px;
+  line-height: 0.9;
+  text-align: center;
+  color: var(--accent);
+  text-shadow: 0 0 40px rgba(255,60,60,0.4);
+}
+
+.subtitle {
+  font-size: 11px;
+  letter-spacing: 6px;
+  color: var(--muted);
+}
+
+.input-group {
+  display: flex; gap: 8px; width: 100%;
+}
+
+#roomInput {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 16px;
+  padding: 10px 14px;
+  outline: none;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+#roomInput:focus { border-color: var(--accent); }
+
+#joinBtn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+#joinBtn:hover { opacity: 0.8; }
+
+.hint { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+.room-label { font-size: 13px; color: var(--muted); letter-spacing: 2px; }
+
+/* Spinner */
+.spinner {
+  width: 32px; height: 32px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Canvas ── */
+#gameCanvas {
+  display: block;
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: #0a0a0f;
+}
+
+/* ── Countdown Overlay ── */
+#countdownOverlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#countdownNum {
+  font-size: 160px;
+  font-weight: 900;
+  color: var(--accent);
+  text-shadow: 0 0 80px rgba(255,60,60,0.6);
+  animation: pulse 0.9s ease-out;
+}
+@keyframes pulse {
+  0%   { transform: scale(1.6); opacity: 0; }
+  40%  { transform: scale(1);   opacity: 1; }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ── Finish Overlay ── */
+#finishOverlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 20;
+}
+
+.finish-box {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 48px 64px;
+  text-align: center;
+}
+
+#finishTitle {
+  font-size: 48px;
+  letter-spacing: 6px;
+  margin-bottom: 12px;
+}
+
+#finishSub {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 2px;
+}
+
+/* ── HUD ── */
+#hud {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.hud-left, .hud-right {
+  display: flex; gap: 24px; align-items: center;
+}
+
+.hud-block {
+  display: flex; flex-direction: column; gap: 4px;
+}
+
+.hud-label {
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: var(--muted);
+}
+
+.hud-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 1px;
+}
+
+.hud-value.small { font-size: 15px; }
+
+.hp-bar-wrap {
+  width: 120px; height: 8px;
+  background: var(--border);
+}
+
+.hp-bar {
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transition: width 0.1s;
+}
+
+.hp-bar.opp { background: var(--accent2); }

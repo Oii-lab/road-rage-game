@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ROAD RAGE</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Lobby -->
+  <div id="lobby">
+    <div class="lobby-inner">
+      <h1 class="title">ROAD<br>RAGE</h1>
+      <p class="subtitle">2-PLAYER RACING</p>
+      <div class="input-group">
+        <input type="text" id="roomInput" placeholder="Room ID" maxlength="12" autocomplete="off" spellcheck="false">
+        <button id="joinBtn">JOIN</button>
+      </div>
+      <p class="hint">Share the same Room ID with your opponent</p>
+    </div>
+  </div>
+
+  <!-- Waiting -->
+  <div id="waiting" class="hidden">
+    <div class="lobby-inner">
+      <h2>Waiting for opponent…</h2>
+      <div class="spinner"></div>
+      <p class="room-label" id="waitingRoomId"></p>
+    </div>
+  </div>
+
+  <!-- Countdown overlay -->
+  <div id="countdownOverlay" class="hidden">
+    <span id="countdownNum"></span>
+  </div>
+
+  <!-- Finish overlay -->
+  <div id="finishOverlay" class="hidden">
+    <div class="finish-box">
+      <h2 id="finishTitle"></h2>
+      <p id="finishSub"></p>
+    </div>
+  </div>
+
+  <!-- Game -->
+  <canvas id="gameCanvas" class="hidden"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-left">
+      <div class="hud-block">
+        <span class="hud-label">LAP</span>
+        <span class="hud-value" id="hudLap">0 / 3</span>
+      </div>
+      <div class="hud-block">
+        <span class="hud-label">HP</span>
+        <div class="hp-bar-wrap"><div class="hp-bar" id="hudHp"></div></div>
+      </div>
+    </div>
+    <div class="hud-right">
+      <div class="hud-block small">
+        <span class="hud-label">OPP HP</span>
+        <div class="hp-bar-wrap"><div class="hp-bar opp" id="hudOppHp"></div></div>
+      </div>
+      <div class="hud-block small">
+        <span class="hud-label">OPP LAP</span>
+        <span class="hud-value small" id="hudOppLap">0 / 3</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
